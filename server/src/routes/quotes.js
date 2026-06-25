@@ -1,29 +1,30 @@
 import { Router } from 'express';
-import { getQuote } from '../services/yahooFinance.js';
-import { validateTicker } from '../services/yahooFinance.js';
+import { ContractIds, sendContract, sendContractError } from 'shared/contracts';
+import { getQuote, validateTicker } from '../services/yahooFinance.js';
+import { normalizeTicker } from '../utils/ticker.js';
 
 const router = Router();
 
 router.get('/validate/:ticker', async (req, res) => {
   try {
-    const ticker = req.params.ticker.trim().toUpperCase();
+    const ticker = normalizeTicker(req.params.ticker);
     const result = await validateTicker(ticker);
     if (!result.valid) {
-      return res.status(400).json(result);
+      return sendContractError(res, ContractIds.QUOTES_VALIDATE, result.error, 400);
     }
-    res.json(result);
+    sendContract(res, ContractIds.QUOTES_VALIDATE, result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendContractError(res, ContractIds.QUOTES_VALIDATE, err.message, 500);
   }
 });
 
 router.get('/:ticker', async (req, res) => {
   try {
-    const ticker = req.params.ticker.trim().toUpperCase();
+    const ticker = normalizeTicker(req.params.ticker);
     const quote = await getQuote(ticker);
-    res.json(quote);
+    sendContract(res, ContractIds.QUOTES_GET, quote);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendContractError(res, ContractIds.QUOTES_GET, err.message, 500);
   }
 });
 

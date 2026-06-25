@@ -75,6 +75,7 @@ ItsMyMoney/
 npm run dev     # 프론트(5173) + 백엔드(3000) 동시 실행
 npm run build   # 프론트엔드 프로덕션 빌드
 npm start       # 프로덕션 서버 시작
+npm test        # 서버 + 클라이언트 테스트 (TDD, 계약 ID 검증 포함)
 ```
 
 ## 데이터 위치

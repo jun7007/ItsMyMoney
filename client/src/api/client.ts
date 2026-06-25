@@ -1,4 +1,6 @@
 import type { Portfolio, Stock, StockDetail, Transaction, NewsItem } from '../types';
+import { ContractIds, type ContractId } from '../contracts/ids';
+import { unwrapContract } from '../contracts/response';
 
 const PIN_KEY = 'itsmymoney_pin';
 
@@ -11,18 +13,23 @@ function getHeaders(): HeadersInit {
   return headers;
 }
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+async function request<T>(url: string, contractId?: ContractId, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...options,
     headers: { ...getHeaders(), ...options?.headers },
   });
 
+  const body = await res.json().catch(() => ({}));
+
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed: ${res.status}`);
+    const message =
+      typeof body === 'object' && body && 'error' in body
+        ? String(body.error)
+        : `Request failed: ${res.status}`;
+    throw new Error(message);
   }
 
-  return res.json();
+  return unwrapContract<T>(body, contractId);
 }
 
 export function setAccessPin(pin: string) {
@@ -34,23 +41,29 @@ export function clearAccessPin() {
 }
 
 export const api = {
-  health: () => request<{ status: string }>('/api/health'),
+  health: () =>
+    request<{ status: string; timestamp: string }>('/api/health', ContractIds.HEALTH_CHECK),
 
-  getPortfolio: () => request<Portfolio>('/api/portfolio'),
+  getPortfolio: () => request<Portfolio>('/api/portfolio', ContractIds.PORTFOLIO_GET),
 
   getStockDetail: (id: number) =>
-    request<StockDetail>(`/api/portfolio/stock/${id}`),
+    request<StockDetail>(`/api/portfolio/stock/${id}`, ContractIds.PORTFOLIO_STOCK_DETAIL),
 
-  getStocks: () => request<Stock[]>('/api/stocks'),
+  getStocks: () => request<Stock[]>('/api/stocks', ContractIds.STOCKS_LIST),
 
-  addStock: (data: { ticker: string; name?: string; market?: string }) =>
-    request<Stock>('/api/stocks', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  addStock: async (data: { ticker: string; name?: string; market?: string }) => {
+    const result = await request<{ stock: Stock; validationWarning: string | null }>(
+      '/api/stocks',
+      ContractIds.STOCKS_CREATE,
+      { method: 'POST', body: JSON.stringify(data) },
+    );
+    return result;
+  },
 
   deleteStock: (id: number) =>
-    request<{ success: boolean }>(`/api/stocks/${id}`, { method: 'DELETE' }),
+    request<{ success: boolean }>(`/api/stocks/${id}`, ContractIds.STOCKS_DELETE, {
+      method: 'DELETE',
+    }),
 
   getTransactions: (params?: { stock_id?: number; from?: string; to?: string }) => {
     const query = new URLSearchParams();
@@ -60,6 +73,7 @@ export const api = {
     const qs = query.toString();
     return request<Transaction[]>(
       `/api/transactions${qs ? `?${qs}` : ''}`,
+      ContractIds.TRANSACTIONS_LIST,
     );
   },
 
@@ -72,19 +86,22 @@ export const api = {
     traded_at: string;
     memo?: string;
   }) =>
-    request<Transaction>('/api/transactions', {
+    request<Transaction>('/api/transactions', ContractIds.TRANSACTIONS_CREATE, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   deleteTransaction: (id: number) =>
-    request<{ success: boolean }>(`/api/transactions/${id}`, { method: 'DELETE' }),
+    request<{ success: boolean }>(`/api/transactions/${id}`, ContractIds.TRANSACTIONS_DELETE, {
+      method: 'DELETE',
+    }),
 
   validateTicker: (ticker: string) =>
-    request<{ valid: boolean; name?: string; market?: string; currency?: string; error?: string }>(
+    request<{ valid: boolean; name?: string; market?: string; currency?: string }>(
       `/api/quotes/validate/${encodeURIComponent(ticker)}`,
+      ContractIds.QUOTES_VALIDATE,
     ),
 
   getNews: (ticker: string) =>
-    request<NewsItem[]>(`/api/news/${encodeURIComponent(ticker)}`),
+    request<NewsItem[]>(`/api/news/${encodeURIComponent(ticker)}`, ContractIds.NEWS_GET),
 };

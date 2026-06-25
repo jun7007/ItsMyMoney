@@ -1,15 +1,17 @@
 import { Router } from 'express';
+import { ContractIds, sendContract, sendContractError } from 'shared/contracts';
 import { getNews } from '../services/yahooFinance.js';
+import { normalizeTicker } from '../utils/ticker.js';
 
 const router = Router();
 
 router.get('/:ticker', async (req, res) => {
   try {
-    const ticker = req.params.ticker.trim().toUpperCase();
+    const ticker = normalizeTicker(req.params.ticker);
     const news = await getNews(ticker);
-    res.json(news);
+    sendContract(res, ContractIds.NEWS_GET, news);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendContractError(res, ContractIds.NEWS_GET, err.message, 500);
   }
 });
 
