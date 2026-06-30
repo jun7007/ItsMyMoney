@@ -72,3 +72,10 @@ export interface StockDetail {
   quoteUpdatedAt: string | null;
   transactions: Transaction[];
 }
+
+export interface StockSearchItem {
+  ticker: string;
+  name: string;
+  market: 'KR' | 'US';
+  currency: string;
+}

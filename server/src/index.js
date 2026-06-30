@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { initDb } from './db/index.js';
 import { createApp } from './app.js';
 import { getLocalAddresses } from './utils/network.js';
+import { initKrxService } from './services/krxService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '../../.env') });
@@ -12,6 +13,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
 initDb();
+initKrxService();
 
 const app = createApp();
 

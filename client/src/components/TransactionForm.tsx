@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../api/client';
-import type { Stock } from '../types';
+import type { Stock, StockSearchItem } from '../types';
 
 interface TransactionFormProps {
   onSuccess: () => void;
@@ -18,8 +18,12 @@ export default function TransactionForm({ onSuccess }: TransactionFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [newTicker, setNewTicker] = useState('');
   const [addingStock, setAddingStock] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<StockSearchItem[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.getStocks().then(setStocks).catch((err) => {
@@ -27,31 +31,89 @@ export default function TransactionForm({ onSuccess }: TransactionFormProps) {
     });
   }, []);
 
-  const registerStock = async (ticker: string) => {
-    const result = await api.addStock({ ticker: ticker.trim() });
-    setStocks((prev) => {
-      if (prev.some((s) => s.id === result.stock.id)) return prev;
-      return [...prev, result.stock];
-    });
-    setStockId(String(result.stock.id));
-    setNewTicker('');
-    return result;
-  };
+  const selectedStock = stocks.find((s) => String(s.id) === stockId);
+  const isQueryMatchingSelected = selectedStock && searchQuery === `${selectedStock.name} (${selectedStock.ticker})`;
 
-  const handleAddStock = async () => {
-    if (!newTicker.trim()) {
-      setError('티커를 입력해주세요.');
+  // Sync search query when stock selection changes
+  useEffect(() => {
+    if (selectedStock) {
+      setSearchQuery(`${selectedStock.name} (${selectedStock.ticker})`);
+    } else {
+      setSearchQuery('');
+    }
+  }, [stockId, stocks]);
+
+  // Debounced search for new stocks
+  useEffect(() => {
+    const selectedStockName = selectedStock ? `${selectedStock.name} (${selectedStock.ticker})` : '';
+    if (!searchQuery.trim() || searchQuery === selectedStockName) {
+      setSearchResults([]);
       return;
     }
+
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const results = await api.searchStocks(searchQuery);
+        setSearchResults(results);
+      } catch (err) {
+        console.error('Search error:', err);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, selectedStock]);
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectLocalStock = async (stock: Stock) => {
+    setStockId(String(stock.id));
+    setShowDropdown(false);
+
+    // If local name is just the ticker, update it in background with a better name from search results
+    const searchMatch = searchResults.find(item => item.ticker === stock.ticker);
+    if (searchMatch && stock.name === stock.ticker && searchMatch.name !== stock.ticker) {
+      try {
+        const result = await api.addStock({
+          ticker: stock.ticker,
+          name: searchMatch.name,
+          market: stock.market,
+        });
+        setStocks((prev) => prev.map((s) => (s.id === result.stock.id ? result.stock : s)));
+      } catch (err) {
+        console.error('Failed to update stock name in background:', err);
+      }
+    }
+  };
+
+  const handleSelectSearchItem = async (item: StockSearchItem) => {
     setAddingStock(true);
     setError(null);
     setSuccess(null);
     try {
-      const result = await registerStock(newTicker);
-      const warning = result.validationWarning
-        ? ` (시세 검증 경고: ${result.validationWarning})`
-        : '';
-      setSuccess(`종목이 등록되었습니다: ${result.stock.name} (${result.stock.ticker})${warning}`);
+      const result = await api.addStock({
+        ticker: item.ticker,
+        name: item.name,
+        market: item.market,
+      });
+      setStocks((prev) => {
+        if (prev.some((s) => s.id === result.stock.id)) return prev;
+        return [...prev, result.stock];
+      });
+      setStockId(String(result.stock.id));
+      setSuccess(`종목이 등록되었습니다: ${result.stock.name} (${result.stock.ticker})`);
+      setShowDropdown(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '종목 등록에 실패했습니다.');
     } finally {
@@ -59,15 +121,47 @@ export default function TransactionForm({ onSuccess }: TransactionFormProps) {
     }
   };
 
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    if (!val) {
+      setStockId('');
+    }
+  };
+
+  const handleFocus = () => {
+    setShowDropdown(true);
+  };
+
+  const filteredLocalStocks = stocks
+    .map((s) => {
+      const searchMatch = searchResults.find((item) => item.ticker === s.ticker);
+      if (searchMatch && s.name === s.ticker) {
+        return { ...s, name: searchMatch.name };
+      }
+      return s;
+    })
+    .filter((s) => {
+      if (!searchQuery || isQueryMatchingSelected) return true;
+      const q = searchQuery.toLowerCase();
+
+      if (s.name.toLowerCase().includes(q) || s.ticker.toLowerCase().includes(q)) {
+        return true;
+      }
+
+      if (searchResults.some((item) => item.ticker === s.ticker)) {
+        return true;
+      }
+
+      return false;
+    });
+
+  const filteredSearchResults = searchResults.filter(
+    (item) => !stocks.some((s) => s.ticker === item.ticker)
+  );
+
   const resolveStockId = async (): Promise<number> => {
     if (stockId) return parseInt(stockId, 10);
-
-    if (newTicker.trim()) {
-      const result = await registerStock(newTicker);
-      return result.stock.id;
-    }
-
-    throw new Error('종목을 선택하거나 새 티커를 입력해주세요.');
+    throw new Error('종목을 검색하여 선택해주세요.');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -124,49 +218,106 @@ export default function TransactionForm({ onSuccess }: TransactionFormProps) {
         </p>
       )}
 
-      <div className="flex gap-2">
-        <select
-          value={stockId}
-          onChange={(e) => setStockId(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-        >
-          <option value="">종목 선택</option>
-          {stocks.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.ticker})
-            </option>
-          ))}
-        </select>
-      </div>
+      <div className="relative" ref={containerRef}>
+        <label htmlFor="stock-search" className="mb-1 block text-xs text-slate-400">종목</label>
+        <div className="relative">
+          <input
+            id="stock-search"
+            type="text"
+            placeholder="종목명 또는 티커 검색 (예: 삼성전자, AAPL)"
+            value={searchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            onFocus={(e) => {
+              e.currentTarget.select();
+              handleFocus();
+            }}
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm pr-8"
+            autoComplete="off"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setStockId('');
+                setSearchQuery('');
+                setSearchResults([]);
+              }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
-      <div className="flex gap-2">
-        <input
-          type="text"
-          placeholder="새 종목 티커 (예: AAPL, 005930.KS)"
-          value={newTicker}
-          onChange={(e) => setNewTicker(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-        />
-        <button
-          type="button"
-          onClick={handleAddStock}
-          disabled={addingStock}
-          className="rounded-lg bg-slate-700 px-3 py-2 text-sm hover:bg-slate-600 disabled:opacity-50"
-        >
-          {addingStock ? '등록 중...' : '등록'}
-        </button>
-      </div>
+        {showDropdown && (
+          <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-750 bg-slate-800 py-1 shadow-xl max-h-60 overflow-y-auto">
+            {/* Registered stocks */}
+            {filteredLocalStocks.length > 0 && (
+              <div>
+                <div className="px-3 py-1.5 text-xxs font-semibold uppercase tracking-wider text-slate-400 bg-slate-850">
+                  내 포트폴리오 종목
+                </div>
+                {filteredLocalStocks.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => handleSelectLocalStock(s)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700 flex justify-between items-center text-slate-200 cursor-pointer"
+                  >
+                    <span>{s.name}</span>
+                    <span className="text-xs text-slate-400">{s.ticker}</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
-      <p className="text-xs text-slate-500">
-        티커만 입력하고 거래 저장을 눌러도 종목이 자동 등록됩니다.
-      </p>
+            {/* External Search Results */}
+            {filteredSearchResults.length > 0 && (
+              <div>
+                <div className="px-3 py-1.5 text-xxs font-semibold uppercase tracking-wider text-slate-400 bg-slate-850 border-t border-slate-700/50">
+                  새로운 종목 검색 결과
+                </div>
+                {filteredSearchResults.map((item) => (
+                  <button
+                    key={item.ticker}
+                    type="button"
+                    onClick={() => handleSelectSearchItem(item)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700 flex justify-between items-center text-slate-200 cursor-pointer disabled:opacity-50"
+                    disabled={addingStock}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {item.name}
+                      <span className="text-xxs rounded bg-slate-700 px-1 py-0.2 text-slate-400">
+                        {item.market === 'KR' ? '국내' : '해외'}
+                      </span>
+                    </span>
+                    <span className="text-xs text-slate-400">{item.ticker}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {searching && (
+              <div className="px-3 py-2 text-sm text-slate-400 text-center">
+                검색 중...
+              </div>
+            )}
+
+            {filteredLocalStocks.length === 0 && filteredSearchResults.length === 0 && !searching && (
+              <div className="px-3 py-3 text-sm text-slate-500 text-center">
+                {searchQuery ? '검색 결과가 없습니다.' : '종목명을 입력하여 검색하세요.'}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex gap-2">
         <button
           type="button"
           onClick={() => setType('BUY')}
-          className={`flex-1 rounded-lg py-2 text-sm font-medium ${
-            type === 'BUY' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+          className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors cursor-pointer ${
+            type === 'BUY' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400'
           }`}
         >
           매수
@@ -174,8 +325,8 @@ export default function TransactionForm({ onSuccess }: TransactionFormProps) {
         <button
           type="button"
           onClick={() => setType('SELL')}
-          className={`flex-1 rounded-lg py-2 text-sm font-medium ${
-            type === 'SELL' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400'
+          className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors cursor-pointer ${
+            type === 'SELL' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'
           }`}
         >
           매도

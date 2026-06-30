@@ -46,6 +46,11 @@ export default function StockCard({ holding, compact }: StockCardProps) {
           <div>
             <p>현재가</p>
             <p className={pnlColor(changePct)}>{formatCurrency(currentPrice, currency)}</p>
+            {holding.quoteUpdatedAt && (
+              <p className="text-[10px] text-slate-500 mt-0.5" title={new Date(holding.quoteUpdatedAt).toLocaleString('ko-KR')}>
+                갱신: {new Date(holding.quoteUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            )}
           </div>
         </div>
       )}

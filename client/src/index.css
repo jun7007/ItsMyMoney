@@ -1,8 +1,8 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-profit: #22c55e;
-  --color-loss: #ef4444;
+  --color-profit: #ef4444;
+  --color-loss: #3b82f6;
 }
 
 body {

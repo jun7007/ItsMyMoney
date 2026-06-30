@@ -65,7 +65,14 @@ export default function StockDetail() {
           <div className="flex items-start justify-between">
             <div>
               <p className="text-sm text-slate-400">{stock.ticker}</p>
-              <p className="text-2xl font-bold">{formatCurrency(currentPrice, currency)}</p>
+              <div className="flex items-baseline gap-2">
+                <p className="text-2xl font-bold">{formatCurrency(currentPrice, currency)}</p>
+                {detail.quoteUpdatedAt && (
+                  <span className="text-[10px] text-slate-500" title={new Date(detail.quoteUpdatedAt).toLocaleString('ko-KR')}>
+                    ({new Date(detail.quoteUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 갱신)
+                  </span>
+                )}
+              </div>
               <p className={`text-sm ${pnlColor(changePct)}`}>
                 {formatPercent(changePct)} (일일)
               </p>
@@ -108,7 +115,7 @@ export default function StockDetail() {
                 >
                   <span
                     className={
-                      tx.type === 'BUY' ? 'text-emerald-400' : 'text-red-400'
+                      tx.type === 'BUY' ? 'text-red-400' : 'text-blue-400'
                     }
                   >
                     {tx.type === 'BUY' ? '매수' : '매도'}

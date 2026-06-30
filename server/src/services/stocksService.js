@@ -28,8 +28,20 @@ export async function createStock(input, deps = {}) {
   }
 
   const db = getDb();
-  const existing = db.prepare('SELECT id FROM stocks WHERE ticker = ?').get(normalizedTicker);
+  const existing = db.prepare('SELECT * FROM stocks WHERE ticker = ?').get(normalizedTicker);
   if (existing) {
+    let updated = false;
+    if (existing.name === existing.ticker && input.name) {
+      const newName = input.name.trim();
+      if (newName && newName !== existing.name) {
+        db.prepare('UPDATE stocks SET name = ? WHERE id = ?').run(newName, existing.id);
+        updated = true;
+      }
+    }
+    if (updated) {
+      const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(existing.id);
+      return { ok: true, stock, validationWarning: null };
+    }
     return { ok: false, status: 409, error: 'Stock already registered' };
   }
 

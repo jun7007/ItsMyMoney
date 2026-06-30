@@ -12,6 +12,7 @@ export const ContractIds = {
   QUOTES_GET: 'quotes.get',
   QUOTES_VALIDATE: 'quotes.validate',
   NEWS_GET: 'news.get',
+  STOCKS_SEARCH: 'stocks.search',
 } as const;
 
 export type ContractId = (typeof ContractIds)[keyof typeof ContractIds];

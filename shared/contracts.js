@@ -14,6 +14,7 @@ export const ContractIds = Object.freeze({
   QUOTES_GET: 'quotes.get',
   QUOTES_VALIDATE: 'quotes.validate',
   NEWS_GET: 'news.get',
+  STOCKS_SEARCH: 'stocks.search',
 });
 
 /**

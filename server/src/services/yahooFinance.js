@@ -1,7 +1,5 @@
-import YahooFinance from 'yahoo-finance2';
 import { getDb } from '../db/index.js';
 
-const yahooFinance = new YahooFinance();
 const CACHE_TTL = parseInt(process.env.PRICE_CACHE_TTL || '60', 10) * 1000;
 
 function inferMarket(ticker) {
@@ -14,19 +12,110 @@ function inferCurrency(ticker, quoteCurrency) {
   return inferMarket(ticker) === 'KR' ? 'KRW' : 'USD';
 }
 
+async function fetchNaverKrQuotes(tickers) {
+  if (tickers.length === 0) return {};
+  try {
+    const codes = tickers.map(t => t.split('.')[0]);
+    const url = `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${codes.join(',')}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Naver Polling API status ${res.status}`);
+    
+    const data = await res.json();
+    const results = {};
+    
+    const areas = data.result?.areas || [];
+    const itemArea = areas.find(a => a.name === 'SERVICE_ITEM');
+    const datas = itemArea?.datas || [];
+    
+    for (const item of datas) {
+      const code = item.cd;
+      const ticker = tickers.find(t => t.startsWith(code));
+      if (!ticker) continue;
+      
+      results[ticker] = {
+        ticker,
+        price: item.nv ?? 0,
+        changePct: item.cr ?? 0,
+        currency: 'KRW',
+        updatedAt: new Date(data.result?.time || Date.now()).toISOString(),
+      };
+    }
+    return results;
+  } catch (err) {
+    console.error('Failed to fetch Naver KR quotes:', err.message);
+    return {};
+  }
+}
+
+async function fetchNaverKrName(ticker) {
+  try {
+    const code = ticker.split('.')[0];
+    const url = `https://m.stock.naver.com/api/stock/${code}/integration`;
+    const res = await fetch(url);
+    if (res.status === 200) {
+      const data = await res.json();
+      return data.stockName || ticker;
+    }
+  } catch (err) {
+    // Continue
+  }
+  return ticker;
+}
+
+async function fetchNaverUsQuote(ticker) {
+  const suffixes = ['.O', '.N', '.A', ''];
+  for (const suffix of suffixes) {
+    try {
+      const url = `https://api.stock.naver.com/stock/${ticker}${suffix}/basic`;
+      const res = await fetch(url);
+      if (res.status === 200) {
+        const data = await res.json();
+        return {
+          ticker,
+          price: data.closePrice ?? 0,
+          changePct: data.fluctuationsRatio ?? 0,
+          currency: data.currencyType?.code || 'USD',
+          updatedAt: data.localTradedAt ? new Date(data.localTradedAt).toISOString() : new Date().toISOString(),
+          name: data.stockNameEng || data.stockName || ticker
+        };
+      }
+    } catch (err) {
+      // Continue
+    }
+  }
+  return null;
+}
+
 export async function validateTicker(ticker) {
   try {
-    const quote = await yahooFinance.quote(ticker);
-    if (!quote || quote.regularMarketPrice == null) {
-      return { valid: false, error: 'Ticker not found or no price data' };
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    if (isKR) {
+      const krQuotes = await fetchNaverKrQuotes([ticker]);
+      const quote = krQuotes[ticker];
+      if (!quote) {
+        return { valid: false, error: 'Ticker not found or no price data' };
+      }
+      const name = await fetchNaverKrName(ticker);
+      return {
+        valid: true,
+        name,
+        currency: 'KRW',
+        market: 'KR',
+        price: quote.price,
+      };
+    } else {
+      const quote = await fetchNaverUsQuote(ticker);
+      if (!quote) {
+        return { valid: false, error: 'Ticker not found or no price data' };
+      }
+      return {
+        valid: true,
+        name: quote.name,
+        currency: quote.currency,
+        market: 'US',
+        price: quote.price,
+      };
     }
-    return {
-      valid: true,
-      name: quote.shortName || quote.longName || ticker,
-      currency: inferCurrency(ticker, quote.currency),
-      market: inferMarket(ticker),
-      price: quote.regularMarketPrice,
-    };
   } catch (err) {
     return { valid: false, error: err.message || 'Failed to validate ticker' };
   }
@@ -69,10 +158,29 @@ export async function getQuote(ticker) {
   if (cached) return cached;
 
   try {
-    const quote = await yahooFinance.quote(ticker);
-    const price = quote.regularMarketPrice ?? 0;
-    const changePct = quote.regularMarketChangePercent ?? 0;
-    const currency = inferCurrency(ticker, quote.currency);
+    const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+    let price = 0;
+    let changePct = 0;
+    let currency = isKR ? 'KRW' : 'USD';
+    let updatedAt = new Date().toISOString();
+
+    if (isKR) {
+      const krQuotes = await fetchNaverKrQuotes([ticker]);
+      const quote = krQuotes[ticker];
+      if (quote) {
+        price = quote.price;
+        changePct = quote.changePct;
+        updatedAt = quote.updatedAt;
+      }
+    } else {
+      const quote = await fetchNaverUsQuote(ticker);
+      if (quote) {
+        price = quote.price;
+        changePct = quote.changePct;
+        currency = quote.currency;
+        updatedAt = quote.updatedAt;
+      }
+    }
 
     setCachedQuote(ticker, price, changePct, currency);
 
@@ -81,7 +189,7 @@ export async function getQuote(ticker) {
       price,
       changePct,
       currency,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       cached: false,
     };
   } catch (err) {
@@ -104,29 +212,48 @@ export async function getQuotes(tickers) {
 
   if (uncached.length > 0) {
     try {
-      const quotes = await yahooFinance.quote(uncached);
-      const quoteList = Array.isArray(quotes) ? quotes : [quotes];
+      const krTickers = uncached.filter(t => t.endsWith('.KS') || t.endsWith('.KQ'));
+      const usTickers = uncached.filter(t => !t.endsWith('.KS') && !t.endsWith('.KQ'));
 
-      for (const quote of quoteList) {
-        const ticker = quote.symbol;
-        const price = quote.regularMarketPrice ?? 0;
-        const changePct = quote.regularMarketChangePercent ?? 0;
-        const currency = inferCurrency(ticker, quote.currency);
+      // Fetch KR quotes
+      if (krTickers.length > 0) {
+        const krQuotes = await fetchNaverKrQuotes(krTickers);
+        for (const ticker of krTickers) {
+          const quote = krQuotes[ticker] || { price: 0, changePct: 0, currency: 'KRW', updatedAt: new Date().toISOString() };
+          setCachedQuote(ticker, quote.price, quote.changePct, quote.currency);
+          results[ticker] = {
+            ticker,
+            price: quote.price,
+            changePct: quote.changePct,
+            currency: quote.currency,
+            updatedAt: quote.updatedAt,
+            cached: false,
+          };
+        }
+      }
 
-        setCachedQuote(ticker, price, changePct, currency);
-        results[ticker] = {
-          ticker,
-          price,
-          changePct,
-          currency,
-          updatedAt: new Date().toISOString(),
-          cached: false,
-        };
+      // Fetch US quotes
+      if (usTickers.length > 0) {
+        const usQuotesList = await Promise.all(usTickers.map(t => fetchNaverUsQuote(t)));
+        for (let i = 0; i < usTickers.length; i++) {
+          const ticker = usTickers[i];
+          const quote = usQuotesList[i] || { price: 0, changePct: 0, currency: 'USD', updatedAt: new Date().toISOString() };
+          setCachedQuote(ticker, quote.price, quote.changePct, quote.currency);
+          results[ticker] = {
+            ticker,
+            price: quote.price,
+            changePct: quote.changePct,
+            currency: quote.currency,
+            updatedAt: quote.updatedAt,
+            cached: false,
+          };
+        }
       }
     } catch (err) {
       for (const ticker of uncached) {
         if (!results[ticker]) {
-          results[ticker] = { ticker, price: 0, changePct: 0, error: err.message };
+          const isKR = ticker.endsWith('.KS') || ticker.endsWith('.KQ');
+          results[ticker] = { ticker, price: 0, changePct: 0, currency: isKR ? 'KRW' : 'USD', error: err.message };
         }
       }
     }

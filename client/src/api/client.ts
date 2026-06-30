@@ -1,4 +1,4 @@
-import type { Portfolio, Stock, StockDetail, Transaction, NewsItem } from '../types';
+import type { Portfolio, Stock, StockDetail, Transaction, NewsItem, StockSearchItem } from '../types';
 import { ContractIds, type ContractId } from '../contracts/ids';
 import { unwrapContract } from '../contracts/response';
 
@@ -104,4 +104,10 @@ export const api = {
 
   getNews: (ticker: string) =>
     request<NewsItem[]>(`/api/news/${encodeURIComponent(ticker)}`, ContractIds.NEWS_GET),
+
+  searchStocks: (query: string) =>
+    request<StockSearchItem[]>(
+      `/api/stocks/search?q=${encodeURIComponent(query)}`,
+      ContractIds.STOCKS_SEARCH,
+    ),
 };

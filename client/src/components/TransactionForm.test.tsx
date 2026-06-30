@@ -8,6 +8,7 @@ vi.mock('../api/client', () => ({
     getStocks: vi.fn(),
     addStock: vi.fn(),
     addTransaction: vi.fn(),
+    searchStocks: vi.fn(),
   },
 }));
 
@@ -24,6 +25,15 @@ describe('TransactionForm', () => {
   it('auto-registers ticker and saves transaction with success message', async () => {
     const user = userEvent.setup();
     const onSuccess = vi.fn();
+
+    mockedApi.searchStocks.mockResolvedValue([
+      {
+        ticker: 'AAPL',
+        name: 'Apple Inc.',
+        market: 'US',
+        currency: 'USD',
+      },
+    ]);
 
     mockedApi.addStock.mockResolvedValue({
       stock: {
@@ -52,13 +62,20 @@ describe('TransactionForm', () => {
 
     render(<TransactionForm onSuccess={onSuccess} />);
 
-    await user.type(screen.getByPlaceholderText(/새 종목 티커/), 'AAPL');
+    await user.type(screen.getByPlaceholderText(/종목명 또는 티커 검색/), 'AAPL');
+    const option = await screen.findByText('Apple Inc.');
+    await user.click(option);
+
     await user.type(screen.getByLabelText('수량'), '3');
     await user.type(screen.getByLabelText('단가'), '100');
     await user.click(screen.getByRole('button', { name: '거래 저장' }));
 
     await waitFor(() => {
-      expect(mockedApi.addStock).toHaveBeenCalledWith({ ticker: 'AAPL' });
+      expect(mockedApi.addStock).toHaveBeenCalledWith({
+        ticker: 'AAPL',
+        name: 'Apple Inc.',
+        market: 'US',
+      });
       expect(mockedApi.addTransaction).toHaveBeenCalled();
       expect(onSuccess).toHaveBeenCalled();
     });

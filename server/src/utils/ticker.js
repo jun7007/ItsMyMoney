@@ -8,7 +8,7 @@ export function inferCurrencyFromTicker(ticker) {
 }
 
 export function isValidTickerFormat(ticker) {
-  return /^[A-Z]{1,10}$/.test(ticker) || /^\d{6}\.(KS|KQ)$/.test(ticker);
+  return /^[A-Z]{1,10}$/.test(ticker) || /^[A-Z0-9]{6}\.(KS|KQ)$/.test(ticker);
 }
 
 export function normalizeTicker(ticker) {

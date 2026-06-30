@@ -59,10 +59,10 @@ export default function Transactions() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                        className={`rounded px-1.5 py-0.5 text-xs font-medium border ${
                           tx.type === 'BUY'
-                            ? 'bg-emerald-900/50 text-emerald-400'
-                            : 'bg-red-900/50 text-red-400'
+                            ? 'bg-red-950/80 text-red-400 border-red-900/50'
+                            : 'bg-blue-950/80 text-blue-400 border-blue-900/50'
                         }`}
                       >
                         {tx.type === 'BUY' ? '매수' : '매도'}
